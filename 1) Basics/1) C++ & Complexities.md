@@ -1,4 +1,4 @@
-# C++ Basics + Time & Space Complexity
+# C++ Basics & Complexity
 
 ---
 
