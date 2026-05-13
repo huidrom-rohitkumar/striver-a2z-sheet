@@ -1,5 +1,3 @@
-# Basic Maths for DSA
-
 > Video Reference: [Striver — Basic Maths for DSA](https://youtu.be/1xNbjMdbjug)
 >
 > Problems Covered: Count Digits | Reverse Integer | Palindrome Number | Armstrong Numbers | GCD / HCF and LCM | Print All Divisors | Check for Prime
