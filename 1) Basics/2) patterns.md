@@ -1,7 +1,3 @@
-# Striver A2Z DSA Sheet — Important Pattern Problems Master Notes
-
----
-
 # Why Pattern Problems Matter
 
 Most beginners think pattern problems are useless because they only print stars or numbers.
