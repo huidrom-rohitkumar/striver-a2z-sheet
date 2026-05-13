@@ -1,5 +1,3 @@
-### C++ STL
-
 > **Based on Striver's A2Z DSA Sheet**
 > [TakeUForward STL Reference](https://takeuforward.org/c/c-stl-tutorial-most-frequent-used-stl-containers)
 
