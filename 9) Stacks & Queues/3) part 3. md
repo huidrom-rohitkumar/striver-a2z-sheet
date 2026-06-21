@@ -1,0 +1,1030 @@
+# Stack and Queue: Advanced Design Problems
+
+**Topic:** Advanced Stack, Queue, and Cache Design Problems
+
+## Resources
+
+- [Sliding Window Maximum — Striver](https://youtu.be/eay-zoSRkVc)
+- [Stock Span Problem — Striver](https://youtu.be/NwBvene4Imo)
+- [Celebrity Problem — Striver](https://youtu.be/cEadsbTeze4)
+- [LRU Cache — Striver](https://youtu.be/z9bJUPxzFOw)
+- [LFU Cache — Striver](https://youtu.be/mzqHlAW7jeE)
+
+**Problems Covered:** Sliding Window Maximum (LC 239) | Stock Span Problem (LC 901 / GFG) | The Celebrity Problem (GFG) | LRU Cache (LC 146) | LFU Cache (LC 460) | Word Break (LC 139)
+
+---
+
+## Table of Contents
+
+1. [Core Mental Models](#1-core-mental-models)
+2. [Sliding Window Maximum (LC 239)](#2-sliding-window-maximum-lc-239)
+3. [Stock Span Problem (LC 901 / GFG)](#3-stock-span-problem-lc-901--gfg)
+4. [The Celebrity Problem (GFG)](#4-the-celebrity-problem-gfg)
+5. [LRU Cache (LC 146)](#5-lru-cache-lc-146)
+6. [LFU Cache (LC 460)](#6-lfu-cache-lc-460)
+7. [Word Break (LC 139)](#7-word-break-lc-139)
+8. [Unified Pattern Reference](#8-unified-pattern-reference)
+9. [Edge Cases](#9-edge-cases)
+10. [Common Mistakes and Pitfalls](#10-common-mistakes-and-pitfalls)
+11. [Complexity Cheat Sheet](#11-complexity-cheat-sheet)
+12. [Quick Revision Cheat Sheet](#12-quick-revision-cheat-sheet)
+
+---
+
+## 1. Core Mental Models
+
+This file contains two distinct families of problems, both extremely high-frequency in placement interviews.
+
+**Family 1 — Monotonic Data Structures (Sliding Window Max, Stock Span, Celebrity):**
+
+The unifying idea: elements that can never be the answer to a future query should be eliminated immediately rather than stored. For sliding window maximum, a smaller element sitting behind a larger one in the window can never become the maximum for any future window — it is permanently useless and is discarded. For stock span, days already absorbed into a previous span computation never need to be revisited individually — their information is compressed into a single accumulated value. For the celebrity problem, a single comparison eliminates exactly one of two candidates.
+
+A monotonic deque or stack acts as a curated candidate list: it stores only elements that have a chance of being the answer to a future query, in the order they would be queried. This curation converts an O(n times k) or O(n squared) brute force into O(n), because every element enters and leaves the structure at most once, amortized O(1) per element.
+
+**Family 2 — Cache Design (LRU, LFU):**
+
+The challenge is satisfying three simultaneous requirements: O(1) lookup by key, O(1) update of access order, and O(1) eviction of the least-useful item. No single data structure provides all three:
+
+| Requirement | HashMap alone | Doubly Linked List alone |
+|---|---|---|
+| O(1) lookup by key | Yes | No (O(n) scan) |
+| O(1) reorder given a pointer | No (no ordering) | Yes |
+| O(1) remove least-useful item | No | Yes (tail removal) |
+
+The resolution: pair a HashMap (key maps to node pointer) with a Doubly Linked List (nodes in recency or frequency order). The HashMap gives instant access to any node; the DLL lets you reorder or remove that node in O(1) using its pointers. This composition, using two simple structures whose strengths complement each other's weaknesses, is the canonical pattern for cache design, and LRU/LFU are the two most important examples in interview preparation.
+
+---
+
+## 2. Sliding Window Maximum (LC 239)
+
+**Problem:** Given array `nums` and integer `k`, return the maximum of every contiguous subarray of size k as the window slides left to right.
+
+**Constraints:** `1 <= k <= n <= 100000`, `-10000 <= nums[i] <= 10000`.
+
+**Example:**
+
+```
+nums = [1,3,-1,-3,5,3,6,7], k=3
+Output: [3,3,5,5,6,7]
+```
+
+### Why Brute Force Fails
+
+For each of the `n-k+1` window positions, scanning all k elements costs O(n times k). For n = k = 100000, that is 10 billion operations, far beyond a 1-second time limit. The inefficiency: consecutive windows share k-1 elements, but brute force recomputes from scratch every time, ignoring this overlap.
+
+### Approach 1: Brute Force O(n times k)
+
+```cpp
+vector<int> maxSlidingWindow(vector<int>& nums, int k) {
+    int n = nums.size();
+    vector<int> result;
+    for (int i = 0; i <= n - k; i++) {
+        int maxVal = nums[i];
+        for (int j = i + 1; j < i + k; j++) maxVal = max(maxVal, nums[j]);
+        result.push_back(maxVal);
+    }
+    return result;
+}
+```
+
+### Approach 2: Max-Heap O(n log k)
+
+Maintain a max-heap of (value, index) pairs. The top is the current maximum candidate. Lazily discard stale entries (index out of window) when they surface at the top.
+
+```cpp
+vector<int> maxSlidingWindow(vector<int>& nums, int k) {
+    priority_queue<pair<int,int>> pq;   // max-heap: {value, index}
+    vector<int> result;
+    for (int i = 0; i < (int)nums.size(); i++) {
+        pq.push({nums[i], i});
+        while (pq.top().second <= i - k) pq.pop();   // discard stale top
+        if (i >= k - 1) result.push_back(pq.top().first);
+    }
+    return result;
+}
+```
+
+Time: O(n log k). Space: O(n) worst case (stale entries linger until popped).
+
+### Approach 3: Monotonic Deque O(n), Optimal
+
+**Key insight:** Maintain a deque storing indices (never values) in decreasing order of their corresponding values. This gives two properties:
+
+1. The front is always the index of the current window's maximum.
+2. The back is always a valid future candidate.
+
+**Two invariant-maintaining operations:**
+
+- **Expire the front:** if the front index has slid out of the window (`front == i - k`), pop it.
+- **Pop smaller elements from the back before inserting:** when inserting index `i`, any back element with value less than or equal to `nums[i]` can never be the maximum for any future window. `i` is to its right and at least as large, so `i` would always be chosen over it whenever both are in range. Discard permanently.
+
+```cpp
+vector<int> maxSlidingWindow(vector<int>& nums, int k) {
+    deque<int> dq;   // stores indices; values strictly decreasing front-to-back
+    vector<int> result;
+    int n = nums.size();
+
+    for (int i = 0; i < n; i++) {
+        // Expire front if it has left the window
+        if (!dq.empty() && dq.front() == i - k) dq.pop_front();
+
+        // Remove back elements that can never be useful again
+        while (!dq.empty() && nums[dq.back()] <= nums[i]) dq.pop_back();
+
+        dq.push_back(i);
+
+        if (i >= k - 1) result.push_back(nums[dq.front()]);
+    }
+    return result;
+}
+```
+
+**Why store indices, not values:** Checking expiry requires comparing positions, not magnitudes. If you stored values, you could not distinguish "this value has left the window" from "another instance of this same value is still inside." Always store indices; fetch values via `nums[dq.front()]`.
+
+**Why each index is processed in amortized O(1):** Every index is pushed exactly once (one `push_back` per iteration) and popped at most once, either from the front (expiry) or from the back (displaced by a larger value). Total push plus pop operations across all n iterations is at most 2n. Hence O(n) total.
+
+Time: O(n). Space: O(k).
+
+### Dry Run: nums = [1,3,-1,-3,5,3,6,7], k=3
+
+```
+i=0: nums[0]=1. No expiry. No back pop. Push 0. dq=[0]. i<2, skip.
+i=1: nums[1]=3. No expiry. Pop back: nums[0]=1<=3 -> pop 0. dq=[]. Push 1. dq=[1]. i<2, skip.
+i=2: nums[2]=-1. No expiry. Pop back: nums[1]=3>-1 -> stop. Push 2. dq=[1,2]. i=2: result=[nums[1]]=[3].
+i=3: nums[3]=-3. Expiry: dq.front()=1==3-3=0? No. Pop back: nums[2]=-1>-3 -> stop. Push 3. dq=[1,2,3]. result=[3,3].
+i=4: nums[4]=5. Expiry: dq.front()=1==4-3=1? YES -> pop 1. dq=[2,3]. Pop back: nums[3]=-3<=5 -> pop 3. nums[2]=-1<=5 -> pop 2. dq=[]. Push 4. dq=[4]. result=[3,3,5].
+i=5: nums[5]=3. Expiry: front=4==5-3=2? No. Pop back: nums[4]=5>3 -> stop. Push 5. dq=[4,5]. result=[3,3,5,5].
+i=6: nums[6]=6. Expiry: front=4==6-3=3? No. Pop back: nums[5]=3<=6 -> pop 5. nums[4]=5<=6 -> pop 4. dq=[]. Push 6. dq=[6]. result=[3,3,5,5,6].
+i=7: nums[7]=7. Expiry: front=6==7-3=4? No. Pop back: nums[6]=6<=7 -> pop 6. dq=[]. Push 7. dq=[7]. result=[3,3,5,5,6,7].
+
+Final: [3,3,5,5,6,7]  (matches expected output)
+```
+
+### Edge Cases
+
+| Input | k | Output | Reason |
+|---|---|---|---|
+| `[1]` | 1 | `[1]` | Single element, single window |
+| `[1,2,3]` | 3 | `[3]` | Only one window total |
+| `[3,2,1]` | 1 | `[3,2,1]` | Window size 1: every element is its own window |
+
+---
+
+## 3. Stock Span Problem (LC 901 / GFG)
+
+**Problem:** Design an online algorithm that, given each new day's stock price, returns the span: the number of consecutive days (including today) going backward for which the price was less than or equal to today's price.
+
+**Example:**
+
+```
+Prices fed in order: 100, 80, 60, 70, 75, 85, 90
+Spans:                1,   1,  1,  2,  3,  5,  6
+```
+
+### Why Brute Force is O(n squared) for Stock Span
+
+For each new price, walk backward through all previous prices until a higher one is found. For ascending prices, this walks back to day 1 every time: O(1+2+...+n) = O(n squared).
+
+### The Monotonic Stack Insight
+
+**The trick:** Store pairs (price, span) on a stack, prices in decreasing order from bottom to top. When a new price P arrives, pop all entries whose price is less than or equal to P, accumulating their spans into a running total. The accumulated total plus 1 (for today) is the answer.
+
+**Why absorbing spans is correct:** When (price_j, span_j) is popped because price_j is less than or equal to current_price, every day represented by span_j is less than or equal to price_j, which is less than or equal to current_price. For any future price P greater than or equal to current_price, all of these days will also be less than or equal to P, and current_price now stands as their single representative. There is no need to ever re-examine them individually; current_price's entry absorbs their entire history.
+
+```cpp
+class StockSpanner {
+    stack<pair<int,int>> st;   // {price, accumulated span}
+public:
+    int next(int price) {
+        int span = 1;
+        while (!st.empty() && st.top().first <= price) {
+            span += st.top().second;
+            st.pop();
+        }
+        st.push({price, span});
+        return span;
+    }
+};
+```
+
+Time: O(n) amortized, each price is pushed once and popped at most once across all calls. Space: O(n) worst case (strictly decreasing prices never get popped).
+
+### Dry Run: prices [100, 80, 60, 70, 75, 85, 90]
+
+```
+price=100: stack empty. span=1. push(100,1). stack=[(100,1)]. return 1.
+price=80:  top=(100,1), 100>80, stop. span=1. push(80,1). stack=[(100,1),(80,1)]. return 1.
+price=60:  top=(80,1), 80>60, stop. span=1. push(60,1). stack=[(100,1),(80,1),(60,1)]. return 1.
+price=70:  top=(60,1), 60<=70 -> pop, span=1+1=2. top=(80,1), 80>70, stop. push(70,2). return 2.
+price=75:  top=(70,2), 70<=75 -> pop, span=1+2=3. top=(80,1), 80>75, stop. push(75,3). return 3.
+price=85:  top=(75,3), 75<=85 -> pop, span=1+3=4. top=(80,1), 80<=85 -> pop, span=4+1=5. top=(100,1), 100>85, stop. push(85,5). return 5.
+price=90:  top=(85,5), 85<=90 -> pop, span=1+5=6. top=(100,1), 100>90, stop. push(90,6). return 6.
+
+Final stack: [(100,1),(90,6)].
+Spans returned: [1,1,1,2,3,5,6]  (matches expected output)
+```
+
+### GFG Offline Version (Full Array Input)
+
+```cpp
+vector<int> calculateSpan(vector<int>& prices) {
+    int n = prices.size();
+    vector<int> span(n);
+    stack<int> st;   // stores indices
+    for (int i = 0; i < n; i++) {
+        while (!st.empty() && prices[st.top()] <= prices[i]) st.pop();
+        span[i] = st.empty() ? i + 1 : i - st.top();
+        st.push(i);
+    }
+    return span;
+}
+```
+
+The line `span[i] = st.empty() ? i + 1 : i - st.top()` means: if the stack empties, every prior price was less than or equal to today's, so the span covers all days from the start (i+1 days). Otherwise, the span is the distance to the nearest previous strictly-greater price.
+
+---
+
+## 4. The Celebrity Problem (GFG)
+
+**Problem:** Among n people (0 to n-1), a celebrity is known by everyone else and knows nobody. Given `knows(a, b)` in O(1), find the celebrity, or -1 if none exists.
+
+**Constraints:** `2 <= n <= 1000`.
+
+### Why Brute Force is O(n squared) for Celebrity
+
+For each candidate i, verify all n-1 others know i, and i knows none of them: 2(n-1) calls per candidate, n candidates total.
+
+### The Elimination Insight
+
+A single call to `knows(a, b)` eliminates exactly one candidate:
+
+- If `knows(a, b)` is true: a knows someone, so a cannot be the celebrity (celebrity knows nobody). Eliminate a.
+- If `knows(a, b)` is false: b is not known by a, so b cannot be the celebrity (celebrity is known by everyone). Eliminate b.
+
+Either outcome removes exactly one of the two candidates. Starting with n candidates, n-1 comparisons reduce to exactly 1 surviving candidate.
+
+### Approach: Two-Pointer Elimination, O(n)
+
+```cpp
+int findCelebrity(int n) {
+    int candidate = 0;
+    for (int i = 1; i < n; i++) {
+        if (knows(candidate, i)) candidate = i;   // candidate knows i -> candidate eliminated
+        // else: i is eliminated (not known by candidate); candidate survives
+    }
+
+    // Verification: elimination only finds the ONLY POSSIBLE celebrity, not a guarantee
+    for (int i = 0; i < n; i++) {
+        if (i == candidate) continue;
+        if (!knows(i, candidate) || knows(candidate, i)) return -1;
+    }
+    return candidate;
+}
+```
+
+**Why verification is mandatory:** Elimination guarantees that if a celebrity exists, the surviving candidate must be them, but it does not guarantee a celebrity exists at all. The candidate must still be checked against both celebrity conditions.
+
+Time: O(n), n-1 calls in elimination, at most 2(n-1) calls in verification. Space: O(1).
+
+### Dry Run: n=4, celebrity=2
+
+```
+knows matrix:
+       0  1  2  3
+  0: [ 0, 1, 1, 0 ]
+  1: [ 0, 0, 1, 0 ]
+  2: [ 0, 0, 0, 0 ]   <- celebrity: knows nobody
+  3: [ 1, 1, 1, 0 ]
+
+Elimination:
+  candidate=0
+  i=1: knows(0,1)=1 -> candidate=1
+  i=2: knows(1,2)=1 -> candidate=2
+  i=3: knows(2,3)=0 -> candidate stays 2
+
+Verification (candidate=2):
+  i=0: knows(0,2)=1 ok, knows(2,0)=0 ok
+  i=1: knows(1,2)=1 ok, knows(2,1)=0 ok
+  i=3: knows(3,2)=1 ok, knows(2,3)=0 ok
+  All pass -> return 2
+```
+
+### Edge Cases
+
+| Input | Output | Reason |
+|---|---|---|
+| All know each other mutually | -1 | No one satisfies "knows nobody" |
+| n=2, person 0 is celebrity | 0 | Minimal valid case |
+| Candidate survives but fails verification | -1 | Elimination found the only possible celebrity, but they don't satisfy both conditions |
+
+---
+
+## 5. LRU Cache (LC 146)
+
+**Problem:** Design a Least Recently Used cache with capacity `cap`. `get(key)` and `put(key, value)` must run in O(1). On eviction, remove the least recently used item. Both `get` and `put` count as a use, updating recency.
+
+**Example:**
+
+```
+LRUCache(2)
+put(1,1)        // {1=1}
+put(2,2)        // {1=1, 2=2}
+get(1) -> 1     // 1 becomes most recent: {2=2, 1=1}
+put(3,3)        // evicts 2 (LRU): {1=1, 3=3}
+get(2) -> -1    // evicted
+```
+
+### Why No Single Structure Suffices
+
+See Section 1's table. The resolution: HashMap[key] equals node pointer; DLL holds nodes in recency order (most recently used at head, least recently used at tail).
+
+### Design: Two Sentinel Nodes
+
+Dummy `head` (MRU end) and dummy `tail` (LRU end) eliminate all null-pointer special cases when inserting or deleting at either end.
+
+```
+head <-> [most recent] <-> ... <-> [least recent] <-> tail
+```
+
+```cpp
+class LRUCache {
+    struct Node {
+        int key, val;
+        Node *prev, *next;
+        Node(int k, int v) : key(k), val(v), prev(nullptr), next(nullptr) {}
+    };
+
+    int cap;
+    unordered_map<int, Node*> mp;
+    Node *head, *tail;
+
+    void removeNode(Node* node) {
+        node->prev->next = node->next;
+        node->next->prev = node->prev;
+    }
+
+    void insertAfterHead(Node* node) {
+        node->next = head->next;
+        node->prev = head;
+        head->next->prev = node;
+        head->next = node;
+    }
+
+public:
+    LRUCache(int capacity) : cap(capacity) {
+        head = new Node(-1, -1);
+        tail = new Node(-1, -1);
+        head->next = tail;
+        tail->prev = head;
+    }
+
+    int get(int key) {
+        if (!mp.count(key)) return -1;
+        Node* node = mp[key];
+        removeNode(node);
+        insertAfterHead(node);   // every access updates recency
+        return node->val;
+    }
+
+    void put(int key, int value) {
+        if (mp.count(key)) {
+            mp[key]->val = value;
+            removeNode(mp[key]);
+            insertAfterHead(mp[key]);
+        } else {
+            if ((int)mp.size() == cap) {
+                Node* lru = tail->prev;
+                removeNode(lru);
+                mp.erase(lru->key);
+                delete lru;
+            }
+            Node* newNode = new Node(key, value);
+            mp[key] = newNode;
+            insertAfterHead(newNode);
+        }
+    }
+};
+```
+
+**Pointer update checklist:**
+
+`removeNode(node)` requires 2 updates:
+- `node->prev->next = node->next`
+- `node->next->prev = node->prev`
+
+`insertAfterHead(node)` requires 4 updates:
+- `node->next = head->next`
+- `node->prev = head`
+- `head->next->prev = node`
+- `head->next = node`
+
+Time: O(1) for both operations. Space: O(capacity).
+
+### Dry Run: LRUCache(2)
+
+```
+put(1,1): head<->[1,1]<->tail. mp={1:n1}
+put(2,2): head<->[2,2]<->[1,1]<->tail. mp={1:n1,2:n2}
+get(1):   n1 removed, reinserted after head.
+          head<->[1,1]<->[2,2]<->tail. return 1.
+put(3,3): full. LRU=tail->prev=n2(key=2). Remove n2, erase mp[2].
+          Insert [3,3] after head.
+          head<->[3,3]<->[1,1]<->tail. mp={1:n1,3:n3}
+get(2):   not in mp -> return -1
+put(4,4): full. LRU=n1(key=1). Remove, erase mp[1].
+          head<->[4,4]<->[3,3]<->tail. mp={3:n3,4:n4}
+get(1):   -1 (evicted)
+get(3):   move n3 to front. head<->[3,3]<->[4,4]<->tail. return 3
+get(4):   move n4 to front. head<->[4,4]<->[3,3]<->tail. return 4
+```
+
+### Shorter Implementation with std::list
+
+```cpp
+class LRUCache {
+    int cap;
+    list<pair<int,int>> dll;                              // {key, value}, front = MRU
+    unordered_map<int, list<pair<int,int>>::iterator> mp;
+
+public:
+    LRUCache(int capacity) : cap(capacity) {}
+
+    int get(int key) {
+        if (!mp.count(key)) return -1;
+        dll.splice(dll.begin(), dll, mp[key]);   // move to front, O(1)
+        return mp[key]->second;
+    }
+
+    void put(int key, int value) {
+        if (mp.count(key)) {
+            mp[key]->second = value;
+            dll.splice(dll.begin(), dll, mp[key]);
+        } else {
+            if ((int)mp.size() == cap) {
+                mp.erase(dll.back().first);
+                dll.pop_back();
+            }
+            dll.push_front({key, value});
+            mp[key] = dll.begin();
+        }
+    }
+};
+```
+
+`list::splice` relocates a node in O(1) without invalidating iterators, a C++ standard guarantee that makes the stored iterators in `mp` remain valid after every splice.
+
+---
+
+## 6. LFU Cache (LC 460)
+
+**Problem:** Design a Least Frequently Used cache. `get` and `put` in O(1). On eviction, remove the least frequently used item; ties broken by least recently used.
+
+**Example:**
+
+```
+LFUCache(2)
+put(1,1)       // freq{1:1}, minFreq=1
+put(2,2)       // freq{1:1,2:1}, minFreq=1
+get(1) -> 1    // freq{1:2,2:1}, minFreq=1 (key 2 still at freq 1)
+put(3,3)       // evict LFU: freq=1 group={2}, evict 2
+get(2) -> -1   // evicted
+```
+
+### The Key Insight: Two-Level Organization
+
+LRU needs one level of ordering (recency). LFU needs two: nodes are grouped by frequency, and within each frequency group, ordered by recency. Picture library shelves: shelf 1 holds books used once, shelf 2 holds books used twice; within each shelf, the book at the back is the least recently touched.
+
+**Data structures:**
+
+1. `keyMap`: key maps to Node pointer, for O(1) lookup.
+2. `freqMap`: frequency maps to a DLL, for O(1) access to any frequency group (most recently used at head, least recently used at tail within each DLL).
+3. `minFreq`: an integer tracking the current minimum frequency, for O(1) eviction.
+
+**On access (get, or put on an existing key):**
+
+1. Remove the node from `freqMap[node->freq]`.
+2. If that DLL is now empty and `node->freq == minFreq`, increment `minFreq`.
+3. Increment `node->freq`.
+4. Insert the node at the head of `freqMap[node->freq]` (most recent in its new frequency group).
+
+**On eviction:** remove the tail (LRU) node from `freqMap[minFreq]`; erase from `keyMap`.
+
+**On inserting a new key:** new nodes always start at freq=1, so `minFreq` resets to 1.
+
+```cpp
+class LFUCache {
+    struct Node {
+        int key, val, freq;
+        Node *prev, *next;
+        Node(int k, int v) : key(k), val(v), freq(1), prev(nullptr), next(nullptr) {}
+    };
+
+    struct DLL {
+        Node *head, *tail;
+        int size;
+        DLL() : size(0) {
+            head = new Node(-1,-1); tail = new Node(-1,-1);
+            head->next = tail; tail->prev = head;
+        }
+        void addFirst(Node* node) {
+            node->next = head->next; node->prev = head;
+            head->next->prev = node; head->next = node;
+            size++;
+        }
+        void remove(Node* node) {
+            node->prev->next = node->next;
+            node->next->prev = node->prev;
+            size--;
+        }
+        Node* removeLast() {
+            if (size == 0) return nullptr;
+            Node* lru = tail->prev;
+            remove(lru);
+            return lru;
+        }
+    };
+
+    int cap, minFreq;
+    unordered_map<int, Node*> keyMap;
+    unordered_map<int, DLL*> freqMap;
+
+    void updateFreq(Node* node) {
+        int f = node->freq;
+        freqMap[f]->remove(node);
+        if (freqMap[f]->size == 0 && f == minFreq) minFreq++;
+        node->freq++;
+        if (!freqMap.count(node->freq)) freqMap[node->freq] = new DLL();
+        freqMap[node->freq]->addFirst(node);
+    }
+
+public:
+    LFUCache(int capacity) : cap(capacity), minFreq(0) {}
+
+    int get(int key) {
+        if (!keyMap.count(key)) return -1;
+        Node* node = keyMap[key];
+        updateFreq(node);
+        return node->val;
+    }
+
+    void put(int key, int value) {
+        if (cap == 0) return;
+        if (keyMap.count(key)) {
+            keyMap[key]->val = value;
+            updateFreq(keyMap[key]);
+        } else {
+            if ((int)keyMap.size() == cap) {
+                Node* lfu = freqMap[minFreq]->removeLast();
+                keyMap.erase(lfu->key);
+                delete lfu;
+            }
+            Node* newNode = new Node(key, value);
+            keyMap[key] = newNode;
+            minFreq = 1;   // new node always has freq 1
+            if (!freqMap.count(1)) freqMap[1] = new DLL();
+            freqMap[1]->addFirst(newNode);
+        }
+    }
+};
+```
+
+Time: O(1) per operation. Space: O(capacity).
+
+### Full Trace
+
+```
+LFUCache(2)
+put(1,1):   freq{1:1}. minFreq=1.
+put(2,2):   freq{1:1,2:1}. minFreq=1.
+get(1)->1:  freq{1:2,2:1}. minFreq=1 (key 2 still at freq 1).
+put(3,3):   evict LFU: minFreq=1, group={2} (key 1 is now freq 2). Evict key 2.
+            freq{1:2,3:1}. minFreq=1.
+get(2)->-1: evicted.
+get(3)->3:  freq{1:2,3:2}. minFreq=2 (freq-1 group now empty after 3's upgrade).
+get(1)->1:  freq{1:3,3:2}. minFreq=2.
+put(4,4):   evict LFU: minFreq=2, group={3}. Evict key 3.
+get(3)->-1: evicted.
+get(4)->4:  freq{1:3,4:2}.
+get(1)->1:  freq{1:4,4:2}.
+```
+
+### LRU vs LFU: Critical Differences
+
+| Aspect | LRU | LFU |
+|---|---|---|
+| Eviction criterion | Least recently used | Least frequently used (tie: least recently used) |
+| Data structures | 1 HashMap + 1 DLL | 1 keyMap + 1 freqMap (multiple DLLs, one per frequency) |
+| Extra tracked state | None | `minFreq` |
+| When minFreq increments | N/A | When `freqMap[minFreq]` becomes empty after a node's frequency upgrade |
+| When minFreq resets | N/A | Always resets to 1 on a new key insertion |
+| Complexity | O(1) get/put | O(1) get/put |
+
+---
+
+## 7. Word Break (LC 139)
+
+**Problem:** Given string `s` and dictionary `wordDict`, return true if `s` can be segmented into a sequence of one or more dictionary words.
+
+**Examples:**
+
+```
+s="leetcode", wordDict=["leet","code"]  -> true
+s="applepenapple", wordDict=["apple","pen"]  -> true
+s="catsandog", wordDict=["cats","dog","sand","and","cat"]  -> false
+```
+
+### The DP Insight
+
+`dp[i]` is true if `s[0..i-1]` (the first i characters) can be segmented using dictionary words.
+
+**Base case:** `dp[0] = true`. The empty prefix needs zero words, trivially valid.
+
+**Transition:** `dp[i] = true` if there exists `j < i` such that `dp[j] = true` AND `s[j..i-1]` is a dictionary word. Intuition: if the prefix up to `j` is already valid, and the remaining segment from `j` to `i-1` is a whole word, then the prefix up to `i` is valid too.
+
+```cpp
+bool wordBreak(string s, vector<string>& wordDict) {
+    unordered_set<string> dict(wordDict.begin(), wordDict.end());
+    int n = s.size();
+    vector<bool> dp(n + 1, false);
+    dp[0] = true;
+
+    for (int i = 1; i <= n; i++) {
+        for (int j = 0; j < i; j++) {
+            if (dp[j] && dict.count(s.substr(j, i - j))) {
+                dp[i] = true;
+                break;
+            }
+        }
+    }
+    return dp[n];
+}
+```
+
+Time: O(n squared times L) where L is the max word length (substring extraction cost). Space: O(n) for `dp` plus dictionary storage.
+
+### Dry Run: s="leetcode", wordDict=["leet","code"]
+
+```
+dict={"leet","code"}
+dp = [T,F,F,F,F,F,F,F,F]  (indices 0..8)
+
+i=1: j=0: "l" not in dict. dp[1]=F.
+i=2: j=0: "le" no. j=1: dp[1]=F. dp[2]=F.
+i=3: j=0: "lee" no. dp[3]=F.
+i=4: j=0: dp[0]=T, "leet" IN dict! dp[4]=T. break.
+i=5: j=0..3: no. j=4: dp[4]=T, "c" no. dp[5]=F.
+i=6: j=4: dp[4]=T, "co" no. dp[6]=F.
+i=7: j=4: dp[4]=T, "cod" no. dp[7]=F.
+i=8: j=4: dp[4]=T, "code" IN dict! dp[8]=T. break.
+
+Return dp[8] = true
+```
+
+### Optimization: Iterate Over Word Lengths
+
+Instead of checking every `j < i`, only check `j` values where `i - j` equals a length that exists in the dictionary:
+
+```cpp
+bool wordBreak(string s, vector<string>& wordDict) {
+    unordered_set<string> dict(wordDict.begin(), wordDict.end());
+    unordered_set<int> wordLens;
+    for (auto& w : wordDict) wordLens.insert(w.size());
+
+    int n = s.size();
+    vector<bool> dp(n + 1, false);
+    dp[0] = true;
+
+    for (int i = 1; i <= n; i++) {
+        for (int len : wordLens) {
+            if (len <= i && dp[i - len] && dict.count(s.substr(i - len, len))) {
+                dp[i] = true;
+                break;
+            }
+        }
+    }
+    return dp[n];
+}
+```
+
+Time: O(n times W) where W is the number of distinct word lengths, typically much smaller than n.
+
+---
+
+## 8. Unified Pattern Reference
+
+### When to Use a Monotonic Deque
+
+Appropriate when you need the maximum/minimum over a sliding fixed-size window, or when "useless" elements can be permanently discarded the moment a better candidate appears from the right.
+
+| Signal | Use |
+|---|---|
+| Maximum/minimum in every window of size k | Decreasing/increasing monotonic deque |
+| Next greater/smaller element | Monotonic stack |
+| Span of consecutive smaller/equal elements | Monotonic stack with accumulated span |
+| Previous greater element | Monotonic stack (scan left to right, compare against top) |
+
+### When to Use a Monotonic Stack
+
+Stock Span is the canonical template: while the stack is non-empty and the top is less than or equal to current, absorb its value and pop. The defining feature: popped elements' accumulated information is folded into the new top, never discarded outright.
+
+### Cache Design Selection
+
+| Cache type | Eviction policy | Structures | minFreq needed? |
+|---|---|---|---|
+| LRU | Least recently used | 1 HashMap + 1 DLL | No |
+| LFU | Least frequently used, LRU tiebreak | 1 keyMap + 1 freqMap (multiple DLLs) | Yes |
+| MRU | Most recently used | Same as LRU, evict from head instead of tail | No |
+
+### Celebrity-Style Elimination Template
+
+Any problem where a single comparison eliminates exactly one of two candidates:
+
+1. Reduce n candidates to 1 using n-1 comparisons.
+2. Verify the surviving candidate separately. Elimination alone never proves correctness.
+
+---
+
+## 9. Edge Cases
+
+| Problem | Input | Expected | Reason |
+|---|---|---|---|
+| Sliding Window Max | `[1]`, k=1 | `[1]` | Single element |
+| Sliding Window Max | k = array length | Single max value | Only one window exists |
+| Stock Span | All increasing prices | Spans = 1,2,3,4,... | Each price absorbs all previous |
+| Stock Span | All decreasing prices | Spans all = 1 | Stack never pops |
+| Celebrity | All know each other | -1 | No one knows nobody |
+| Celebrity | n=2 | 0 or 1 or -1 | Depends on the single pairwise relation |
+| LRU | put on existing key at capacity | No eviction | Update plus move to front, no new node created |
+| LRU | capacity = 0 | Always returns -1, never stores | Some implementations special-case this |
+| LFU | capacity = 0 | put does nothing | Guard: `if (cap == 0) return;` |
+| LFU | Tie in frequency | Evict the least recently used among them | freqMap DLL ordering handles this naturally |
+| Word Break | Empty dictionary | false unless s is empty | dp[0]=true but no transitions possible |
+| Word Break | s itself is a dictionary word | true | dp[n] reachable directly from dp[0] |
+
+---
+
+## 10. Common Mistakes and Pitfalls
+
+### Mistake 1: Sliding Window Max, storing values instead of indices
+
+```cpp
+// WRONG: cannot reliably detect expiry; duplicate values cause ambiguity
+deque<int> dq;   // stores VALUES
+if (!dq.empty() && dq.front() == nums[i-k]) dq.pop_front();
+// nums[i-k] might match a different, still-valid element elsewhere in the window!
+
+// CORRECT: store indices; compare positions directly
+deque<int> dq;   // stores INDICES
+if (!dq.empty() && dq.front() == i - k) dq.pop_front();
+```
+
+### Mistake 2: Sliding Window Max, wrong expiry comparison
+
+```cpp
+// WRONG: using < instead of == lets expired elements linger one extra iteration
+if (!dq.empty() && dq.front() < i - k) dq.pop_front();
+
+// CORRECT: the window is [i-k+1, i]; index i-k has JUST left
+if (!dq.empty() && dq.front() == i - k) dq.pop_front();
+```
+
+### Mistake 3: LRU Cache, forgetting to update recency on get
+
+```cpp
+// WRONG: get() returns the value but never marks the node as recently used
+int get(int key) {
+    if (!mp.count(key)) return -1;
+    return mp[key]->val;   // missing: move to head
+}
+
+// CORRECT: every access, get or put, updates recency
+int get(int key) {
+    if (!mp.count(key)) return -1;
+    removeNode(mp[key]);
+    insertAfterHead(mp[key]);
+    return mp[key]->val;
+}
+```
+
+### Mistake 4: LRU Cache, not erasing the evicted key from the HashMap
+
+```cpp
+// WRONG: DLL node removed but stale key remains in the map (memory leak, wrong lookups)
+Node* lru = tail->prev;
+removeNode(lru);
+// missing: mp.erase(lru->key);
+
+// CORRECT: always update both structures together
+Node* lru = tail->prev;
+removeNode(lru);
+mp.erase(lru->key);
+delete lru;
+```
+
+### Mistake 5: LFU Cache, not resetting minFreq to 1 on new key insertion
+
+```cpp
+// WRONG: minFreq stays at its old (higher) value after a new freq-1 node is added
+freqMap[1]->addFirst(newNode);
+// If minFreq was 3, eviction will look in freqMap[3] instead of freqMap[1], which is wrong
+
+// CORRECT: new nodes always start at freq=1, so minFreq must reset
+minFreq = 1;
+freqMap[1]->addFirst(newNode);
+```
+
+### Mistake 6: LFU Cache, not incrementing minFreq when its DLL empties
+
+```cpp
+// WRONG: after promoting the sole freq-1 node to freq-2, minFreq remains stuck at 1
+// even though freqMap[1] is now empty
+freqMap[f]->remove(node);
+node->freq++;
+// missing: if (freqMap[f]->size == 0 && f == minFreq) minFreq++;
+
+// CORRECT: check before incrementing the node's frequency
+freqMap[f]->remove(node);
+if (freqMap[f]->size == 0 && f == minFreq) minFreq++;
+node->freq++;
+```
+
+### Mistake 7: Celebrity Problem, skipping verification
+
+```cpp
+// WRONG: returns the survivor without checking it actually satisfies both conditions
+return candidate;
+
+// CORRECT: elimination only narrows to ONE POSSIBLE celebrity; verify before returning
+for (int i = 0; i < n; i++) {
+    if (i == candidate) continue;
+    if (!knows(i, candidate) || knows(candidate, i)) return -1;
+}
+return candidate;
+```
+
+### Mistake 8: Word Break, initializing dp[0] = false
+
+```cpp
+// WRONG: empty prefix base case missing, so no segmentation can ever be found
+vector<bool> dp(n + 1, false);
+// dp[0] never set to true
+
+// CORRECT: empty string requires zero words, which is trivially valid
+dp[0] = true;
+```
+
+### Mistake 9: Stock Span, forgetting to push the current price after popping
+
+```cpp
+// WRONG: forgets to push the current (price, span) onto the stack
+while (!st.empty() && st.top().first <= price) { span += st.top().second; st.pop(); }
+return span;   // missing st.push({price, span})
+
+// CORRECT: always push after the absorbing loop, so future prices can absorb this one
+while (!st.empty() && st.top().first <= price) { span += st.top().second; st.pop(); }
+st.push({price, span});
+return span;
+```
+
+---
+
+## 11. Complexity Cheat Sheet
+
+| Problem | Approach | Time | Space |
+|---|---|---|---|
+| Sliding Window Max | Brute force | O(n times k) | O(1) |
+| Sliding Window Max | Max-heap | O(n log k) | O(n) worst |
+| Sliding Window Max | Monotonic deque | O(n) | O(k) |
+| Stock Span | Brute force | O(n squared) | O(1) |
+| Stock Span | Monotonic stack (span pairs) | O(n) amortized | O(n) |
+| Celebrity Problem | Brute force | O(n squared) | O(1) |
+| Celebrity Problem | Elimination + verify | O(n) | O(1) |
+| LRU Cache | HashMap + DLL | O(1) per op | O(capacity) |
+| LFU Cache | keyMap + freqMap + DLLs | O(1) per op | O(capacity) |
+| Word Break | DP, all substrings | O(n squared times L) | O(n) |
+| Word Break | DP, word lengths only | O(n times W) | O(n) |
+
+---
+
+## 12. Quick Revision Cheat Sheet
+
+**Sliding Window Maximum, Monotonic Deque**
+
+```cpp
+deque<int> dq;   // stores INDICES, values decreasing front-to-back
+for (int i = 0; i < n; i++) {
+    if (!dq.empty() && dq.front() == i-k) dq.pop_front();           // expire (use ==)
+    while (!dq.empty() && nums[dq.back()] <= nums[i]) dq.pop_back(); // remove useless
+    dq.push_back(i);
+    if (i >= k-1) result.push_back(nums[dq.front()]);
+}
+```
+
+Front equals window max. O(n) amortized; each index enters/exits at most once.
+
+---
+
+**Stock Span, Monotonic Stack with Accumulated Span**
+
+```cpp
+stack<pair<int,int>> st;  // {price, accumulated_span}
+int next(int price) {
+    int span = 1;
+    while (!st.empty() && st.top().first <= price) { span += st.top().second; st.pop(); }
+    st.push({price, span});
+    return span;
+}
+```
+
+Pop entries less than or equal to current price, absorb their spans. O(n) amortized.
+
+---
+
+**Celebrity Problem, Eliminate and Verify**
+
+```cpp
+int candidate = 0;
+for (int i = 1; i < n; i++) if (knows(candidate, i)) candidate = i;
+for (int i = 0; i < n; i++) {
+    if (i == candidate) continue;
+    if (!knows(i, candidate) || knows(candidate, i)) return -1;
+}
+return candidate;
+```
+
+Phase 1: O(n) elimination. Phase 2: O(n) verification (mandatory).
+
+---
+
+**LRU Cache, HashMap + DLL**
+
+```
+head (MRU sentinel) <-> ... <-> tail (LRU sentinel)
+removeNode: 2 pointer updates (left and right neighbors reconnect)
+insertAfterHead: 4 pointer updates
+get: remove + insertAfterHead + return value
+put: exists -> update + remove + insertAfterHead
+     new + full -> remove tail->prev, erase from map, insert new after head
+```
+
+O(1) per operation. Always update HashMap and DLL together.
+
+---
+
+**LFU Cache, Two HashMaps + Multiple DLLs**
+
+```
+keyMap:  key -> Node*
+freqMap: freq -> DLL*
+minFreq: tracks minimum frequency for O(1) eviction
+
+updateFreq(node):
+  remove from freqMap[node->freq]
+  if that DLL is now empty AND freq == minFreq: minFreq++
+  node->freq++
+  insert into freqMap[node->freq] (create DLL if needed)
+
+put new key: minFreq = 1; insert into freqMap[1]
+evict: removeLast() from freqMap[minFreq]; erase from keyMap
+```
+
+---
+
+**Word Break, 1D DP**
+
+```cpp
+dp[0] = true;
+for i = 1..n: for j = 0..i-1:
+    if dp[j] && s[j..i-1] in dict: dp[i] = true; break;
+return dp[n];
+```
+
+`dp[i]` means: can `s[0..i-1]` be segmented. Base case `dp[0]=true` is mandatory.
+
+---
+
+**Key Facts**
+
+```
+Monotonic deque invariant: front = window max; values decrease front-to-back.
+                            Front expires when index == i-k (use == not <).
+                            Back elements removed when value <= incoming element.
+
+Stock Span shortcut:       pop entries <= current price, absorb their spans.
+                            Correct because absorbed days can never be a boundary
+                            for any future price >= current.
+
+Celebrity elimination:     knows(a,b)=true -> eliminate a.
+                            knows(a,b)=false -> eliminate b.
+                            ALWAYS verify the surviving candidate.
+
+LRU sentinels:              Eliminate all null-pointer edge cases.
+                            insertAfterHead = 4 pointers. removeNode = 2 pointers.
+                            Update HashMap and DLL together, every time.
+
+LFU minFreq rules:          Reset to 1 only on new key insertion.
+                            Increment only when freqMap[minFreq] becomes empty
+                            after a frequency upgrade. Never decrements.
+
+Word Break dp[0]:           Must be true; empty string needs 0 words, trivially valid.
+```
